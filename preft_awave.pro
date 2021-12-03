@@ -172,7 +172,6 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
 tube.p = pressure ;+ 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
-;print, 'normal pressure ?'
 
 ; also calculate alfven speed for good measure: 
 mb = tube.dm*tube.b
@@ -313,8 +312,10 @@ pro calc_turb_heat, tube
 frac2heat_turb = tube.alfven_params[0];  fraction returned to heat - free parameter ( reminder: frac2heat_turb + frac2heat_nte = 1)
 kperp = tube.alfven_params[1]; a ∼ 􏰌δΦ/B, k⊥ = α*sqrt(B/δΦ) = α*sqrt(1/a) - ad hoc, may need to connect to drag parameter
 
-l_p = kperp * sqrt( tube.wm / tube.rho) * tube.wp * tube.dl ; [erg/cm^2/s]
-l_m = kperp * sqrt( tube.wp / tube.rho) * tube.wm * tube.dl
+wmdrho = tube.wm / tube.rho > 0.0
+wpdrho = tube.wp / tube.rho > 0.0
+l_p = kperp * sqrt( wmdrho ) * tube.wp * tube.dl ; [erg/cm^2/s]
+l_m = kperp * sqrt( wpdrho ) * tube.wm * tube.dl
 
 
 tube.turb_heat = frac2heat_turb * l_p; check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
@@ -330,7 +331,7 @@ end
 
 pro calc_elsasser_plus, tube, dwp
 ;  perform drag_computations
-; everything called before: 
+; eveprop2c = 0.5*( shift( prop2, -1 ) + prop2 )rything called before: 
   ; --- calc_dv: calc_drag, calc_prho (pressure wave)
   ; --- calc_dtemp: calc_turb_heat (turbulant heating), set_kappa (thermal conduction correction)
 
@@ -341,17 +342,18 @@ tube.dva = dvadl/tube.dl
 
 dwpdl = shift( tube.wp, -1 ) - tube.wp 
 dwpdl[tube.n-1] = dwpdl[tube.n-2]
-dwpdl = dwpdl/tube.dl
+dwpdl = dwpdl/tube.dl;dwmdl = shift( tube.wm, -1 ) - tube.wm
 
 prop2 = tube.va*dwpdl
 prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
-cprop_p =  tube.alfven_params[1] * sqrt( tube.wm / tube.rho) * tube.wp
+wmdrho = tube.wm / tube.rho > 0.0
+cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp
 
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
 
-dwp = -0.5*tube.dvn*tube.wp - prop2c + tube.wm*tube.dva - 0.5*total(tube.v*tube.a_drag, 1) + source_e - cprop_p
+dwp = -0.5*tube.dvn*tube.wp - prop2c + tube.wm*tube.dva  + source_e - cprop_p
 
 ; apply BC
 dwp[0] = 0.0
@@ -372,7 +374,8 @@ dwmdl = dwmdl/tube.dl
 prop2 = tube.va*dwmdl
 prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
-cprop_m =  tube.alfven_params[1] * sqrt( tube.wp / tube.rho) * tube.wm
+wpdrho = tube.wp/tube.rho > 0.0
+cprop_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
 
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
@@ -487,7 +490,7 @@ calc_turb_heat, tube ; creates tube.turb_heat to incorporate below
 
 calc_rad_loss, tube
 ;dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.turb_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
-dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat +  tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
+dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
 
 ; :::::: for adiabatic test:
 ; dtemp = (tube.gam-1.0)*tube.t*dlnTdt_ad
@@ -580,18 +583,22 @@ tube.v = vt + dt*dv
 ; advance Alfven energy wave propatagion - plus
 wpt = tube.wp
 calc_elsasser_plus, tube, dwp
-tube.wp = wpt + safe*dt*dwp
+;tube.wp = wpt + safe*dt*dwp
+tube.wp = (wpt + safe*dt*dwp) > 0.0
 
 calc_elsasser_plus, tube, dwp
-tube.wp = wpt + dt*dwp
+;tube.wp = wpt + dt*dwp
+tube.wp = (wpt + dt*dwp) > 0.0
 
 ; advance Alfven energy wave propatagion - minus
 wmt = tube.wm
 calc_elsasser_minus, tube, dwm
-tube.wm = wmt + safe*dt*dwm 
+;tube.wm = wmt + safe*dt*dwm
+tube.wm = (wmt + safe*dt*dwm) > 0.0
 
 calc_elsasser_minus, tube, dwm
-tube.wm = wmt + dt*dwm
+;tube.wm = wmt + dt*dwm
+tube.wm = (wmt + dt*dwm) > 0.0
 
 ; === run the above *prior* to advancing the temperature - velocity begets alfven wave propagation -> causes turbulence -> heats plasma
 
@@ -694,7 +701,10 @@ cnt = 0L
 ; take small step to prepare for clf_step
 one_step, tube, dtmin, isoth=isotherm
 
+;i = 0
 repeat begin
+  ;print, 'onestep = ', i
+  ;print, 'time = ', t
   if( ( cnt mod 5 ) eq 0 ) then $;  only reset time step every 5 steps, to save time
   dtc = cfl_step( tube, [1,1,1,1,0,1] )
   dtf = dtime - t
@@ -702,6 +712,7 @@ repeat begin
   one_step, tube, dt, isoth=isotherm
   t = t + dt
   cnt = cnt + 1
+  ;i = i+1
 endrep until( ( t ge dtime ) or ( cnt gt maxstep ) )
 
 return
