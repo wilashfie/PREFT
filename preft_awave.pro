@@ -3,16 +3,18 @@
 ; Bulding off of Drag version 3.0
 ;    Dana Longcope 2012-12-18
 ;
+; !!! note: this version requires a uniform B field along tube.
+;
 ; Requires set_alfven_energy_densities.pro for correct initialization of arrays
 ;
-; This file contains code necessary to advance TFT equations: 
+; This file contains code necessary to advance TFT equations:
 ;   IDL> adv_tube, tube, dt
 ; calls are made to the following externally defined procedures:
 ;   pro field_at_points, tube
-;   
+;
 ; ---------------------
 ;
-;  units:  
+;  units:
 ;          length        [ Mm = 1.0e8 cm ]
 ;          time          [ sec ]
 ;          energy        [ microflare = uf = 1.0e24 erg ]
@@ -28,12 +30,12 @@
 ;
 ;
 ;   x, v, k, rho_e, b, va
-; edges        0     1     2     3     n-3   n-2   n-1      
+; edges        0     1     2     3     n-3   n-2   n-1
 ;              +--o--+--o--+--o--+-->>--+--o--+--o--+
 ; cells           0     1     2            n-3  n-2
-;   t, dm, p, 
+;   t, dm, p,
 ;   rho, dl, tv, wp, wm
-;   
+;
 ;
 ;    shifting:   cell -> edge:  rho_e = 0.5*( shift( rho, 1 ) + rho )
 ;                edge -> cell:  v_c = 0.5*( shift( v, -1 ) + v )
@@ -77,12 +79,12 @@ dm = dblarr( n ); differential mass
 
 time = 0.0d0;   [ sec ]
 gam = 5.0/3.0;
-; mpp = 0.5;     mass per particle [ amu ]  
+; mpp = 0.5;     mass per particle [ amu ]
 ; epamu = 1.0;   number of electrons per amo
 
 ;  derived quantities
 rho = fltarr( n );  mass density [ 1.0e-16 gm/cm^2 ]
-dl = dblarr( n ); differential length 
+dl = dblarr( n ); differential length
 dl_e = dblarr( n ); differential length @ edges
 l = dblarr( n ); total length
 tv = dblarr( 3, n ); the tangent vector
@@ -90,7 +92,7 @@ tv_e = dblarr( 3, n ); the tangent vector @ edges
 k = dblarr( 3, n ); the curvature vector
 p = fltarr( n );  pressure [ erg/cm^3 ]
 b = fltarr( n );  the field strength @ edges
-db = fltarr( 3, n ); the gradient of field strength (@ edges) 
+db = fltarr( 3, n ); the gradient of field strength (@ edges)
 a_drag = fltarr( 3, n ); the acceleration from drag (@ edges)
 drag_const = fltarr( n );  a constant at each point: units Mm^{-1}
 gpar = fltarr( n );  parallel component of grav. acceleration [ Mm/s/s ]
@@ -110,9 +112,10 @@ rad_loss = fltarr( n );  radiative losses integrated over a cell [ 1.0e8 erg/sec
 va = fltarr( n ) ; local alfen speed @ edges [Mm/s]
 wp = fltarr( n ) ; Alfven wave energy densities [ erg/cm^3 ]  = rho z^2 / 4 ->  z\pm = u ± b/√4πρ are the Elsasser variables.
 wm = fltarr( n )
-alfven_params = fltarr( 9 ) ; parameters for Alfven wave propagation model
+alfven_params = fltarr( 9 ) ; parameters for Alfven wave propagation model:
+; (4) fraction returned to heat | k?~J? = α/a > drag const. | η for kappa adjustment | reflection coeff.
 dva = fltarr( n ) ; dva/dl @ centers
-turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ erg/cm^2/s ]. see calc_turb_heat. 
+turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ erg/cm^2/s ]. see calc_turb_heat.
 rho_e = fltarr( n ) ; density at edges ( for alven speed, mainly )
 
 
@@ -164,7 +167,7 @@ end
 
 pro calc_prho, tube
 ;  the density & then pressure from primative variables
-;   t and dm.  
+;   t and dm.
 ;  ************ calc_tv and field_at_points both must be called first
 
 r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
@@ -173,7 +176,7 @@ tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
 tube.p = pressure ;+ 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
 
-; also calculate alfven speed for good measure: 
+; also calculate alfven speed for good measure:
 mb = tube.dm*tube.b
 tube.rho_e = 0.5*( mb + shift( mb, 1 ) )/tube.dl_e;     mass density [ 1.0e-16 gm/cm^3 ]
 tube.rho_e[0] = tube.rho_e[1]
@@ -199,7 +202,7 @@ tube.rho_e = 0.5*( mb + shift( mb, 1 ) )/tube.dl_e;     mass density [ 1.0e-16 g
 tube.rho_e[0] = tube.rho_e[1]
 
 return
-end 
+end
 
 ; -----------------------------
 
@@ -249,7 +252,7 @@ if( inv_hflf gt 0.01 ) then begin
   rat = sqrt( 1.0 + fctr*fctr )
 endif else rat = 1.0
 
-; tube.kap = kap_sp/rat;     
+; tube.kap = kap_sp/rat;
 kap_rat = kap_sp/rat;                      set to limit
 
 ; correction from Alfven energy wave
@@ -318,12 +321,12 @@ l_p = kperp * sqrt( wmdrho ) * tube.wp * tube.dl ; [erg/cm^2/s]
 l_m = kperp * sqrt( wpdrho ) * tube.wm * tube.dl
 
 
-tube.turb_heat = frac2heat_turb * l_p; check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
+tube.turb_heat = frac2heat_turb * (l_p + l_m); check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
 tube.turb_heat[0] = 0.0
 tube.turb_heat[tube.n-1] = 0.0
 
 
-return 
+return
 end
 
 
@@ -331,7 +334,7 @@ end
 
 pro calc_elsasser_plus, tube, dwp
 ;  perform drag_computations
-; eveprop2c = 0.5*( shift( prop2, -1 ) + prop2 )rything called before: 
+; eveprop2c = 0.5*( shift( prop2, -1 ) + prop2 )rything called before:
   ; --- calc_dv: calc_drag, calc_prho (pressure wave)
   ; --- calc_dtemp: calc_turb_heat (turbulant heating), set_kappa (thermal conduction correction)
 
@@ -340,7 +343,7 @@ dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
 dvadl[tube.n-1] = dvadl[tube.n-2]
 tube.dva = dvadl/tube.dl
 
-dwpdl = shift( tube.wp, -1 ) - tube.wp 
+dwpdl = shift( tube.wp, -1 ) - tube.wp
 dwpdl[tube.n-1] = dwpdl[tube.n-2]
 dwpdl = dwpdl/tube.dl;dwmdl = shift( tube.wm, -1 ) - tube.wm
 
@@ -353,11 +356,12 @@ cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
 
-dwp = -0.5*tube.dvn*tube.wp - prop2c + tube.wm*tube.dva  + source_e - cprop_p
+dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
 
 ; apply BC
 dwp[0] = 0.0
 dwp[tube.n-1] = 0.0
+
 
 return
 end
@@ -380,7 +384,7 @@ cprop_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
 
-dwm = -0.5*tube.dvn*tube.wm + prop2c - tube.wp*tube.dva + source_e - cprop_m
+dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
 
 dwm[0] = 0.0
 dwm[tube.n-1] = 0.0
@@ -600,6 +604,21 @@ calc_elsasser_minus, tube, dwm
 ;tube.wm = wmt + dt*dwm
 tube.wm = (wmt + dt*dwm) > 0.0
 
+; reflections
+; wm(l0) = ηwp(l0) , wp(l1) = ηwm(l1) for reflection coefficient η
+; idea - boundary should be where p is "high"
+; ! should each wave (i.e. wm or wp) be traveling in only one direction? do we see this?
+ref_frac = alfven_params[3]
+ihalf = tube.n/2 ; approx apex
+i0 = max( where(tube.p[0:ihalf] gt 10*tube.p[ihalf]) )
+i1 = min( where(tube.p[ihalf:-1] gt 10*tube.p[ihalf]) ) + ihalf
+
+tube.wm[i0] = ref_frac*tube.wp[i0]
+tube.wp[i1] = ref_frac*tube.wm[i1]
+
+
+
+
 ; === run the above *prior* to advancing the temperature - velocity begets alfven wave propagation -> causes turbulence -> heats plasma
 
 ; advance temperature
@@ -696,7 +715,7 @@ if( not keyword_set( isotherm ) ) then isotherm=0
 
 dtmin=1.0d-15
 t=dtmin
-cnt = 0L 
+cnt = 0L
 
 ; take small step to prepare for clf_step
 one_step, tube, dtmin, isoth=isotherm
