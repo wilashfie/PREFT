@@ -285,7 +285,7 @@ end
 pro calc_drag, tube
 ;  perform drag_computations
 
-frac2heat = tube.drag_params[0];  fraction returned to heat - to be replaced by Alfven wave cascades (below)
+frac2heat = tube.drag_params[0];  fraction returned to heat - to be replaced by Alfven wave cascades? (below)
 
 vpar = total( tube.v*tube.tv_e, 1 )
 vperp = tube.v - ([1,1,1]#vpar)*tube.tv_e
@@ -351,7 +351,7 @@ prop2 = tube.va*dwpdl
 prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
 wmdrho = tube.wm / tube.rho > 0.0
-cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp
+cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... 
 
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
