@@ -359,8 +359,17 @@ source_e = 0.5*( shift( source, 1 ) + source )
 dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
 
 ; apply BC
-dwp[0] = 0.0
-dwp[tube.n-1] = 0.0
+;dwp[0] = 0.0
+;dwp[tube.n-1] = 0.0
+t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+itn = where(tube.t gt t0n)
+i0 = min(itn)
+i1 = max(itn)
+
+dwp[0:i0] = 0.0
+dwp[i1:-1] = 0.0
+
+
 
 
 return
@@ -386,8 +395,17 @@ source_e = 0.5*( shift( source, 1 ) + source )
 
 dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
 
-dwm[0] = 0.0
-dwm[tube.n-1] = 0.0
+; BCs
+;dwm[0] = 0.0
+;dwm[tube.n-1] = 0.0
+t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+itn = where(tube.t gt t0n)
+i0 = min(itn)
+i1 = max(itn)
+
+dwm[0:i0] = 0.0
+dwm[i1:-1] = 0.0
+
 
 return
 end
@@ -608,13 +626,19 @@ tube.wm = (wmt + dt*dwm) > 0.0
 ; wm(l0) = ηwp(l0) , wp(l1) = ηwm(l1) for reflection coefficient η
 ; idea - boundary should be where p is "high"
 ; ! should each wave (i.e. wm or wp) be traveling in only one direction? do we see this?
-ref_frac = alfven_params[3]
-ihalf = tube.n/2 ; approx apex
-i0 = max( where(tube.p[0:ihalf] gt 10*tube.p[ihalf]) )
-i1 = min( where(tube.p[ihalf:-1] gt 10*tube.p[ihalf]) ) + ihalf
+ref_frac = tube.alfven_params[3]
+t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+itn = where(tube.t gt t0n)
+i0 = min(itn)
+i1 = max(itn)
 
-tube.wm[i0] = ref_frac*tube.wp[i0]
-tube.wp[i1] = ref_frac*tube.wm[i1]
+;tube.wp[0:i0] = 0.0
+;tube.wp[i1:-1] = 0.0
+;tube.wm[0:i0] = 0.0
+;tube.wm[i1:-1] = 0.0
+
+;tube.wm[i0] = ref_frac*tube.wp[i0]
+;tube.wp[i1] = ref_frac*tube.wm[i1]
 
 
 
