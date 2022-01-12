@@ -380,7 +380,8 @@ end
 pro calc_elsasser_minus, tube, dwm
 ;  perform drag_computations
 
-dwmdl = shift( tube.wm, -1 ) - tube.wm ; for Alfven speed
+;dwmdl = shift( tube.wm, -1 ) - tube.wm ; for Alfven speed
+dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
 
@@ -602,6 +603,9 @@ calc_dv, tube, dv
 tube.x = xt + dt*tube.v
 tube.v = vt + dt*dv
 
+
+
+; ====================================================================
 ; advance Alfven energy wave propatagion - plus
 wpt = tube.wp
 calc_elsasser_plus, tube, dwp
@@ -639,6 +643,7 @@ i1 = max(itn)
 
 ;tube.wm[i0] = ref_frac*tube.wp[i0]
 ;tube.wp[i1] = ref_frac*tube.wm[i1]
+; ====================================================================
 
 
 
