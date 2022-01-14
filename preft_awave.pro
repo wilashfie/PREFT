@@ -359,8 +359,6 @@ source_e = 0.5*( shift( source, 1 ) + source )
 dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
 
 ; apply BC
-;dwp[0] = 0.0
-;dwp[tube.n-1] = 0.0
 t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 itn = where(tube.t gt t0n)
 i0 = min(itn)
@@ -380,13 +378,12 @@ end
 pro calc_elsasser_minus, tube, dwm
 ;  perform drag_computations
 
-;dwmdl = shift( tube.wm, -1 ) - tube.wm ; for Alfven speed
 dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
 
 prop2 = tube.va*dwmdl
-prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
+prop2c = 0.5*( shift( prop2, 1 ) + prop2 )
 
 wpdrho = tube.wp/tube.rho > 0.0
 cprop_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
@@ -397,8 +394,6 @@ source_e = 0.5*( shift( source, 1 ) + source )
 dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
 
 ; BCs
-;dwm[0] = 0.0
-;dwm[tube.n-1] = 0.0
 t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 itn = where(tube.t gt t0n)
 i0 = min(itn)
