@@ -98,6 +98,7 @@ drag_const = fltarr( n );  a constant at each point: units Mm^{-1}
 gpar = fltarr( n );  parallel component of grav. acceleration [ Mm/s/s ]
 mu = fltarr( n );  dynamic viscosity  [ gm/cm/sec ]
 kap = fltarr( n );  thermal conductivity  [ 1.0e10 erg/cm/K/sec ]
+kap_old = fltarr( n );   test for former tc w/o turbulent surpression 
 dvn = fltarr( n );  tv.(dv/dl)  @ centers
 heat = fltarr( n );  heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
 drag_heat = fltarr( n );  drag heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
@@ -127,7 +128,8 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          dvn:dvn, mu:mu, kap:kap, heat:heat, drag_heat:drag_heat, nte_heat:nte_heat, rad_loss:rad_loss, net_erg_loss:0.0, drag_loss:0.0, $
          mpp:const_str.mpp, epamu:const_str.epamu, mu0:const_str.mu0, kap0:const_str.kap0, $
          inv_hflf:1.0, drag_params:drag_params, drag_loss_rate:0.0, $
-         va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e }
+         va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
+	 kap_old:kap_old }
 
 return, tube
 end
@@ -174,7 +176,7 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
-tube.p = pressure ;+ 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
+tube.p = pressure + 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
 
 ; also calculate alfven speed for good measure:
 mb = tube.dm*tube.b
@@ -262,7 +264,8 @@ dim_parm = tube.alfven_params[2] ; should be set to unity for test.
 wsum = tube.wp + tube.wm
 wsum_e = 0.5*( shift( wsum, 1 ) + wsum )
 rat_alf = 1.0+dim_parm*wsum_e/tube.b^2
-tube.kap = kap_rat;/rat_alf
+tube.kap = kap_rat/rat_alf
+tube.kap_old = kap_rat
 
 return
 end
@@ -340,7 +343,7 @@ pro calc_elsasser_plus, tube, dwp
 
 ; only calculated once. reused below.
 dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
-dvadl[tube.n-1] = dvadl[tube.n-2]
+dvadl[tube.n-1] =dvadl[tube.n-2]
 tube.dva = dvadl/tube.dl
 
 dwpdl = shift( tube.wp, -1 ) - tube.wp
@@ -359,7 +362,7 @@ source_e = 0.5*( shift( source, 1 ) + source )
 dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
 
 ; apply BC
-t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 itn = where(tube.t gt t0n)
 i0 = min(itn)
 i1 = max(itn)
@@ -394,7 +397,7 @@ source_e = 0.5*( shift( source, 1 ) + source )
 dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
 
 ; BCs
-t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 itn = where(tube.t gt t0n)
 i0 = min(itn)
 i1 = max(itn)
@@ -507,8 +510,8 @@ dlnTdt_ad = 0.5*( shift( dlnBdt, -1 ) + dlnBdt ) - tube.dvn
 calc_turb_heat, tube ; creates tube.turb_heat to incorporate below
 
 calc_rad_loss, tube
-;dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.turb_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
-dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
+dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.turb_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
+;dtemp = (tube.gam-1.0)*tube.t*( dlnTdt_ad + ( vheat + ( tube.heat + tube.drag_heat + tube.nte_heat - tube.rad_loss )/tube.dl )/tube.p )
 
 ; :::::: for adiabatic test:
 ; dtemp = (tube.gam-1.0)*tube.t*dlnTdt_ad
@@ -626,18 +629,16 @@ tube.wm = (wmt + dt*dwm) > 0.0
 ; idea - boundary should be where p is "high"
 ; ! should each wave (i.e. wm or wp) be traveling in only one direction? do we see this?
 ref_frac = tube.alfven_params[3]
-t0n = 1.0d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 itn = where(tube.t gt t0n)
-i0 = min(itn)
-i1 = max(itn)
+i0 = min(itn) + 1
+i1 = max(itn) - 1
 
-;tube.wp[0:i0] = 0.0
-;tube.wp[i1:-1] = 0.0
-;tube.wm[0:i0] = 0.0
-;tube.wm[i1:-1] = 0.0
+tube.wp[i1] = ref_frac*tube.wm[i1]
+tube.wm[i0] = ref_frac*tube.wp[i0]
 
-;tube.wm[i0] = ref_frac*tube.wp[i0]
-;tube.wp[i1] = ref_frac*tube.wm[i1]
+;tube.wp[i1] = ref_frac*tube.wp[i0]
+;tube.wm[i0] = ref_frac*tube.wm[i1]
 ; ====================================================================
 
 
