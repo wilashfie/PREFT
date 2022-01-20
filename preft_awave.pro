@@ -5,7 +5,6 @@
 ;
 ; !!! note: this version requires a uniform B field along tube.
 ;
-; Requires set_alfven_energy_densities.pro for correct initialization of arrays
 ;
 ; This file contains code necessary to advance TFT equations:
 ;   IDL> adv_tube, tube, dt
@@ -114,7 +113,7 @@ va = fltarr( n ) ; local alfen speed @ edges [Mm/s]
 wp = fltarr( n ) ; Alfven wave energy densities [ erg/cm^3 ]  = rho z^2 / 4 ->  z\pm = u ± b/√4πρ are the Elsasser variables.
 wm = fltarr( n )
 alfven_params = fltarr( 9 ) ; parameters for Alfven wave propagation model:
-; (4) fraction returned to heat | k?~J? = α/a > drag const. | η for kappa adjustment | reflection coeff.
+; (5) fraction returned to heat | k?~J? = α/a > drag const. | η for kappa adjustment | reflection coe | boolean for pressure wave
 dva = fltarr( n ) ; dva/dl @ centers
 turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ erg/cm^2/s ]. see calc_turb_heat.
 rho_e = fltarr( n ) ; density at edges ( for alven speed, mainly )
@@ -176,7 +175,8 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
-tube.p = pressure + 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
+;tube.p = pressure + 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
+tube.p = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
 
 ; also calculate alfven speed for good measure:
 mb = tube.dm*tube.b
