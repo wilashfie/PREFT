@@ -97,7 +97,7 @@ drag_const = fltarr( n );  a constant at each point: units Mm^{-1}
 gpar = fltarr( n );  parallel component of grav. acceleration [ Mm/s/s ]
 mu = fltarr( n );  dynamic viscosity  [ gm/cm/sec ]
 kap = fltarr( n );  thermal conductivity  [ 1.0e10 erg/cm/K/sec ]
-kap_old = fltarr( n );   test for former tc w/o turbulent surpression 
+kap_old = fltarr( n );   test for former tc w/o turbulent surpression
 dvn = fltarr( n );  tv.(dv/dl)  @ centers
 heat = fltarr( n );  heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
 drag_heat = fltarr( n );  drag heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
@@ -354,7 +354,7 @@ prop2 = tube.va*dwpdl
 prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
 wmdrho = tube.wm / tube.rho > 0.0
-cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... 
+cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above...
 
 source =  -0.5*total(tube.v*tube.a_drag, 1)
 source_e = 0.5*( shift( source, 1 ) + source )
@@ -454,6 +454,8 @@ dv = dv + ([1,1,1]#tube.gpar)*tube.tv_e
 calc_drag, tube
 dv = dv + tube.a_drag
 
+; nte_heat
+calc_nte_heat, tube
 
 ; apply BC
 dv[*,0] = 0.0
