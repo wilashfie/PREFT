@@ -97,12 +97,13 @@ drag_const = fltarr( n );  a constant at each point: units Mm^{-1}
 gpar = fltarr( n );  parallel component of grav. acceleration [ Mm/s/s ]
 mu = fltarr( n );  dynamic viscosity  [ gm/cm/sec ]
 kap = fltarr( n );  thermal conductivity  [ 1.0e10 erg/cm/K/sec ]
-kap_old = fltarr( n );   test for former tc w/o turbulent surpression
+kap_old = fltarr( n );   test for former tc w/o turbulent surpression 
 dvn = fltarr( n );  tv.(dv/dl)  @ centers
 heat = fltarr( n );  heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
 drag_heat = fltarr( n );  drag heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
                        ;  after drag force is computed this will be total losses to drag.
                        ;  after calc_nte_heat is called it will contain only the fraction directly deposited
+drag_flux = fltarr( n ) ; drag_heat prior to fractional energy release. Used to calc (1) drag_heat and (2) source for wp & wm 
 nte_heat = fltarr( n );  NT electron heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
                       ;  computed in calc_nte_heat
 drag_params = fltarr( 10 );  parameters for drag model.  see calc_drag for definitions
@@ -128,7 +129,8 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          mpp:const_str.mpp, epamu:const_str.epamu, mu0:const_str.mu0, kap0:const_str.kap0, $
          inv_hflf:1.0, drag_params:drag_params, drag_loss_rate:0.0, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
-	 kap_old:kap_old }
+	 kap_old:kap_old,$
+	 drag_flux:drag_flux }
 
 return, tube
 end
@@ -288,7 +290,7 @@ end
 pro calc_drag, tube
 ;  perform drag_computations
 
-frac2heat = tube.drag_params[0];  fraction returned to heat - to be replaced by Alfven wave cascades? (below)
+frac2heat = tube.drag_params[0];  fraction returned to heat 
 
 vpar = total( tube.v*tube.tv_e, 1 )
 vperp = tube.v - ([1,1,1]#vpar)*tube.tv_e
@@ -299,9 +301,9 @@ dm_e = 0.5*( tube.dm + shift( tube.dm, 1 ) )
 dm_e[0] = 0.0
 dm_e[tube.n-1] = 0.0
 
-drag_heat = -dm_e*total( tube.v*tube.a_drag, 1 )
-tube.drag_loss_rate = (1.0-frac2heat)*total( drag_heat )
-tube.drag_heat = frac2heat*0.5*( drag_heat + shift( drag_heat, -1 ) )*tube.b ; why magnetic field here?
+drag_b = -dm_e*total( tube.v*tube.a_drag, 1 ) ; energy flux per Gauss @ edges
+tube.drag_flux = 0.5*( drag_b + shift( drag_b, -1 ) )*tube.b  ; energy flux from drag @ center
+tube.drag_heat = frac2heat*tube.drag_flux
 tube.drag_heat[0] = 0.0
 tube.drag_heat[tube.n-1] = 0.0
 
@@ -350,25 +352,28 @@ dwpdl = shift( tube.wp, -1 ) - tube.wp
 dwpdl[tube.n-1] = dwpdl[tube.n-2]
 dwpdl = dwpdl/tube.dl;dwmdl = shift( tube.wm, -1 ) - tube.wm
 
-prop2 = tube.va*dwpdl
-prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
+prop2c = tube.va*dwpdl
+;prop2c = 0.5*( shift( prop2, 1 ) + prop2 )
 
 wmdrho = tube.wm / tube.rho > 0.0
-cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above...
+cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... 
 
-source =  -0.5*total(tube.v*tube.a_drag, 1)
-source_e = 0.5*( shift( source, 1 ) + source )
+;source =  -0.5*total(tube.v*tube.a_drag, 1)
+;source_e = 0.5*( shift( source, 1 ) + source )
 
-dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
+source = 0.5*tube.drag_flux/tube.dl ; volumetric energy flux from drag - does this need to be multiplied by fraction, in addition to calc_turb? 
+
+;dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
+dwp = prop2c + source
 
 ; apply BC
-t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
-itn = where(tube.t gt t0n)
-i0 = min(itn)
-i1 = max(itn)
+;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+;itn = where(tube.t gt t0n)
+;i0 = min(itn)
+;i1 = max(itn)
 
-dwp[0:i0] = 0.0
-dwp[i1:-1] = 0.0
+dwp[0] = 0.0
+dwp[-1] = 0.0
 
 
 
@@ -385,25 +390,25 @@ dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
 
-prop2 = tube.va*dwmdl
-prop2c = 0.5*( shift( prop2, 1 ) + prop2 )
+prop2c = tube.va*dwmdl
+;prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
 wpdrho = tube.wp/tube.rho > 0.0
 cprop_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
 
-source =  -0.5*total(tube.v*tube.a_drag, 1)
-source_e = 0.5*( shift( source, 1 ) + source )
+source = 0.5*tube.drag_flux/tube.dl
 
-dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
+;dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
+dwm = -prop2c + source
 
 ; BCs
-t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
-itn = where(tube.t gt t0n)
-i0 = min(itn)
-i1 = max(itn)
+;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+;itn = where(tube.t gt t0n)
+;i0 = min(itn)
+;i1 = max(itn)
 
-dwm[0:i0] = 0.0
-dwm[i1:-1] = 0.0
+dwm[0] = 0.0
+dwm[-1] = 0.0
 
 
 return
@@ -454,8 +459,6 @@ dv = dv + ([1,1,1]#tube.gpar)*tube.tv_e
 calc_drag, tube
 dv = dv + tube.a_drag
 
-; nte_heat
-calc_nte_heat, tube
 
 ; apply BC
 dv[*,0] = 0.0
@@ -631,16 +634,18 @@ tube.wm = (wmt + dt*dwm) > 0.0
 ; idea - boundary should be where p is "high"
 ; ! should each wave (i.e. wm or wp) be traveling in only one direction? do we see this?
 ref_frac = tube.alfven_params[3]
-t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
-itn = where(tube.t gt t0n)
-i0 = min(itn) + 1
-i1 = max(itn) - 1
+;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
+;itn = where(tube.t gt t0n)
+i0 = 918  ; defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = min(itn) + 1
+i1 = -918 
+;i1 = max(itn) - 1
 
+;tube.wp[i1] = ref_frac*mean(tube.wm[i1:(i1+5)])
 tube.wp[i1] = ref_frac*tube.wm[i1]
+;tube.wm[i0] = ref_frac*mean(tube.wp[(i0-5):i0])
 tube.wm[i0] = ref_frac*tube.wp[i0]
 
-;tube.wp[i1] = ref_frac*tube.wp[i0]
-;tube.wm[i0] = ref_frac*tube.wm[i1]
 ; ====================================================================
 
 
