@@ -74,7 +74,7 @@ if( n_params() lt 1 ) then n=25
 x = dblarr( 3, n );  position [ Mm ]
 v = fltarr( 3, n );  velocity [ Mm/sec ]
 t = dblarr( n );  temperature [ 1.0e6 K ]
-dm = dblarr( n ); differential mass
+dm = dblarr( n ); differential mass [1.0e-8 g/Mx] - Ashfield 1/27/22  ( [Mx] = G cm^2 )
 
 time = 0.0d0;   [ sec ]
 gam = 5.0/3.0;
@@ -82,7 +82,7 @@ gam = 5.0/3.0;
 ; epamu = 1.0;   number of electrons per amo
 
 ;  derived quantities
-rho = fltarr( n );  mass density [ 1.0e-16 gm/cm^2 ]
+rho = fltarr( n );  mass density [ 1.0e-16 gm/cm^3 ] ; volumetric - triple checked Ashfield 1/27/22
 dl = dblarr( n ); differential length
 dl_e = dblarr( n ); differential length @ edges
 l = dblarr( n ); total length
@@ -104,6 +104,7 @@ drag_heat = fltarr( n );  drag heating rate integrated over a cell [ 1.0e8 erg/s
                        ;  after drag force is computed this will be total losses to drag.
                        ;  after calc_nte_heat is called it will contain only the fraction directly deposited
 drag_flux = fltarr( n ) ; drag_heat prior to fractional energy release. Used to calc (1) drag_heat and (2) source for wp & wm 
+dotz = fltarr( n ) ; dot product of 'Elsasser-like' variables. See notes.pdf
 nte_heat = fltarr( n );  NT electron heating rate integrated over a cell [ 1.0e8 erg/sec/cm^2 ]
                       ;  computed in calc_nte_heat
 drag_params = fltarr( 10 );  parameters for drag model.  see calc_drag for definitions
@@ -113,10 +114,12 @@ rad_loss = fltarr( n );  radiative losses integrated over a cell [ 1.0e8 erg/sec
 va = fltarr( n ) ; local alfen speed @ edges [Mm/s]
 wp = fltarr( n ) ; Alfven wave energy densities [ erg/cm^3 ]  = rho z^2 / 4 ->  z\pm = u ± b/√4πρ are the Elsasser variables.
 wm = fltarr( n )
+dwp = fltarr( n )
+dwm = fltarr( n )
 alfven_params = fltarr( 9 ) ; parameters for Alfven wave propagation model:
-; (5) fraction returned to heat | k?~J? = α/a > drag const. | η for kappa adjustment | reflection coe | boolean for pressure wave
+; (5) fraction returned to heat | k_perp [1/Mm] - related to drag const. | η for kappa adjustment | reflection coff | boolean for pressure wave
 dva = fltarr( n ) ; dva/dl @ centers
-turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ erg/cm^2/s ]. see calc_turb_heat.
+turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ 1.0e8 erg/cm^2/s ]. see calc_turb_heat.
 rho_e = fltarr( n ) ; density at edges ( for alven speed, mainly )
 
 
@@ -127,10 +130,10 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          dm:dm, tv:tv, tv_e:tv_e, k:k, rho:rho, t:t, p:p, b:b, db:db, a_drag:a_drag, drag_const:drag_const, gpar:gpar, $
          dvn:dvn, mu:mu, kap:kap, heat:heat, drag_heat:drag_heat, nte_heat:nte_heat, rad_loss:rad_loss, net_erg_loss:0.0, drag_loss:0.0, $
          mpp:const_str.mpp, epamu:const_str.epamu, mu0:const_str.mu0, kap0:const_str.kap0, $
-         inv_hflf:1.0, drag_params:drag_params, drag_loss_rate:0.0, $
+         inv_hflf:1.0, drag_params:drag_params, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
 	 kap_old:kap_old,$
-	 drag_flux:drag_flux }
+	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm }
 
 return, tube
 end
@@ -177,7 +180,6 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
-;tube.p = pressure + 0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
 tube.p = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
 
 ; also calculate alfven speed for good measure:
@@ -198,8 +200,6 @@ pro set_rho, tube
 calc_tv, tube;   in case this is not current
 field_at_points, tube
 tube.dm = tube.dl*tube.rho/tube.b
-
-;tube.rho_e = 0.5*( shift( rho, 1 ) + rho ) ; needed for alven veloicty calc - set_alfven_energy_densities.pro
 
 mb = tube.dm*tube.b
 tube.rho_e = 0.5*( mb + shift( mb, 1 ) )/tube.dl_e;     mass density [ 1.0e-16 gm/cm^3 ]
@@ -260,9 +260,7 @@ endif else rat = 1.0
 kap_rat = kap_sp/rat;                      set to limit
 
 ; correction from Alfven energy wave
-
 dim_parm = tube.alfven_params[2] ; should be set to unity for test.
-
 wsum = tube.wp + tube.wm
 wsum_e = 0.5*( shift( wsum, 1 ) + wsum )
 rat_alf = 1.0+dim_parm*wsum_e/tube.b^2
@@ -301,11 +299,12 @@ dm_e = 0.5*( tube.dm + shift( tube.dm, 1 ) )
 dm_e[0] = 0.0
 dm_e[tube.n-1] = 0.0
 
-drag_b = -dm_e*total( tube.v*tube.a_drag, 1 ) ; energy flux per Gauss @ edges
-tube.drag_flux = 0.5*( drag_b + shift( drag_b, -1 ) )*tube.b  ; energy flux from drag @ center
-tube.drag_heat = frac2heat*tube.drag_flux
+drag_b = -dm_e*total( tube.v*tube.a_drag, 1 ) ; power per Gauss @ edges [10^8 erg/Mx/s]
+tube.drag_flux = 0.5*( drag_b + shift( drag_b, -1 ) )*tube.b    ; energy flux at center from drag (not lost to heating) [10^8 erg/cm^2/s]
+tube.drag_heat = frac2heat*tube.drag_flux  ; energy flux from drag supplied to heating
 tube.drag_heat[0] = 0.0
 tube.drag_heat[tube.n-1] = 0.0
+
 
 return
 end
@@ -343,35 +342,39 @@ pro calc_elsasser_plus, tube, dwp
   ; --- calc_dv: calc_drag, calc_prho (pressure wave)
   ; --- calc_dtemp: calc_turb_heat (turbulant heating), set_kappa (thermal conduction correction)
 
+; divergence of Alfven velocity
 ; only calculated once. reused below.
 dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
 dvadl[tube.n-1] =dvadl[tube.n-2]
 tube.dva = dvadl/tube.dl
 
+; advection
 dwpdl = shift( tube.wp, -1 ) - tube.wp
 dwpdl[tube.n-1] = dwpdl[tube.n-2]
-dwpdl = dwpdl/tube.dl;dwmdl = shift( tube.wm, -1 ) - tube.wm
-
+dwpdl = dwpdl/tube.dl
 prop2c = tube.va*dwpdl
-;prop2c = 0.5*( shift( prop2, 1 ) + prop2 )
 
+; source and sink
 wmdrho = tube.wm / tube.rho > 0.0
-cprop_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... 
+sink_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... from counter propogating waves 
 
-;source =  -0.5*total(tube.v*tube.a_drag, 1)
-;source_e = 0.5*( shift( source, 1 ) + source )
+source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - half of remainging drag energy not lost to heat? 
 
-source = 0.5*tube.drag_flux/tube.dl ; volumetric energy flux from drag - does this need to be multiplied by fraction, in addition to calc_turb? 
 
-;dwp = -1.5*tube.dvn*tube.wp + prop2c + tube.wm*tube.dva  + source_e - cprop_p ; 11/30 updated notes
-dwp = prop2c + source
+; refection
+; elsasser product - reused below
+;zp = ( [1,1,1]#sqrt(tube.rho) ) * tube.v + [1,1,1]#tube.b/sqrt(4*!pi)
+;zm = ( [1,1,1]#sqrt(tube.rho) ) * tube.v - [1,1,1]#tube.b/sqrt(4*!pi)
+;tube.dotz = total(zp*zm, 1)
+;Rp = 0.5 * ( 0.25*tube.dvn + tube.dva ) * tube.dotz
+
+
+; add it all up
+;dwp = prop2c + source -1.5*tube.dvn*tube.wp + tube.wm*tube.dva ;- sink_p
+dwp = -1.5*tube.dvn*tube.wp + source ;- sink_p ;+ tube.wm*tube.dva
+tube.dwp = dwp
 
 ; apply BC
-;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
-;itn = where(tube.t gt t0n)
-;i0 = min(itn)
-;i1 = max(itn)
-
 dwp[0] = 0.0
 dwp[-1] = 0.0
 
@@ -386,27 +389,34 @@ end
 pro calc_elsasser_minus, tube, dwm
 ;  perform drag_computations
 
+
+;dx = tube.x - shift( tube.x, 0, 1 ) 
+;dx[*,tube.n-1] = dx[*,tube.n-2]
+;dl = sqrt( total( dx^2, 1 ) )
+
+;dvadl = tube.va - shift( tube.va, 1 )
+;dvadl[0] =dvadl[1]
+;dva = dvadl/dl
+
 dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
 
 prop2c = tube.va*dwmdl
-;prop2c = 0.5*( shift( prop2, -1 ) + prop2 )
 
 wpdrho = tube.wp/tube.rho > 0.0
-cprop_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
+sink_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
 
-source = 0.5*tube.drag_flux/tube.dl
+source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - half of remainging drag energy not lost to heat? 
 
-;dwm = -1.5*tube.dvn*tube.wm - prop2c - tube.wp*tube.dva + source_e - cprop_m
-dwm = -prop2c + source
+
+;Rm = 0.5 * ( 0.25*tube.dvn - tube.dva ) * tube.dotz
+
+;dwm = -prop2c + source -1.5*tube.dvn*tube.wm - tube.wp*tube.dva ;- sink_m
+dwm =  -1.5*tube.dvn*tube.wm + source ;- sink_m ;-tube.wp*tube.dva
+tube.dwm = dwm
 
 ; BCs
-;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
-;itn = where(tube.t gt t0n)
-;i0 = min(itn)
-;i1 = max(itn)
-
 dwm[0] = 0.0
 dwm[-1] = 0.0
 
@@ -612,22 +622,24 @@ tube.v = vt + dt*dv
 ; advance Alfven energy wave propatagion - plus
 wpt = tube.wp
 calc_elsasser_plus, tube, dwp
+;tube.wp = tube.wp+ safe*dt*dwp
 ;tube.wp = wpt + safe*dt*dwp
-tube.wp = (wpt + safe*dt*dwp) > 0.0
+tube.wp = (tube.wp + safe*dt*dwp); > 0.0
 
 calc_elsasser_plus, tube, dwp
 ;tube.wp = wpt + dt*dwp
-tube.wp = (wpt + dt*dwp) > 0.0
+tube.wp = (wpt + dt*dwp); > 0.0
 
 ; advance Alfven energy wave propatagion - minus
 wmt = tube.wm
 calc_elsasser_minus, tube, dwm
+;tube.wm = tube.wm + safe*dt*dwm
 ;tube.wm = wmt + safe*dt*dwm
-tube.wm = (wmt + safe*dt*dwm) > 0.0
+tube.wm = (tube.wm + safe*dt*dwm); > 0.0
 
 calc_elsasser_minus, tube, dwm
 ;tube.wm = wmt + dt*dwm
-tube.wm = (wmt + dt*dwm) > 0.0
+tube.wm = (wmt + dt*dwm); > 0.0
 
 ; reflections
 ; wm(l0) = ηwp(l0) , wp(l1) = ηwm(l1) for reflection coefficient η
@@ -636,15 +648,23 @@ tube.wm = (wmt + dt*dwm) > 0.0
 ref_frac = tube.alfven_params[3]
 ;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 ;itn = where(tube.t gt t0n)
-i0 = 918  ; defines chromospheric boundary - very specific to initialization of loop! subject to change.
+i0 = 930  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = 1001  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = 0  ; defines chromospheric boundary - very specific to initialization of loop! subject to change.
 ;i0 = min(itn) + 1
-i1 = -918 
+i1 = -i0 
 ;i1 = max(itn) - 1
 
-;tube.wp[i1] = ref_frac*mean(tube.wm[i1:(i1+5)])
+
 tube.wp[i1] = ref_frac*tube.wm[i1]
-;tube.wm[i0] = ref_frac*mean(tube.wp[(i0-5):i0])
 tube.wm[i0] = ref_frac*tube.wp[i0]
+
+tube.wp[0:(i0-1)] = 0.0
+tube.wp[(i1+1):-1] = 0.0
+tube.wm[0:(i0-1)] = 0.0
+tube.wm[(i1+1):-1] = 0.0
+
+
 
 ; ====================================================================
 
@@ -668,7 +688,7 @@ endif
 
 
 tube.net_erg_loss = tube.net_erg_loss + dt*total( tube.rad_loss - tube.heat )
-tube.drag_loss = tube.drag_loss + dt*tube.drag_loss_rate
+tube.drag_loss = tube.drag_loss - dt*total( tube.drag_flux/tube.b ) ; 10^8 erg/Mx - cumulative
 tube.time = tube.time + dt
 
 return
@@ -798,7 +818,11 @@ if( has_tag( tube, 'gpar' ) ) then begin
   grav = total( tube.dm*phi )
 endif else grav = 0.0
 
-erg = { tot:tot, kin:kin, kin_par:kin_par, therm:therm, mag:mag, grav:grav }
+wave = total( (tube.wp+tube.wm) * tube.dl / tube.b ) ; compined energy of waves along loop [10^8 erg/Mx]
+drag = total( tube.drag_flux ) ; !!!! for testing perposes. [erg/cm^3/s] NOT per MB
+drag_mx = total ( tube.drag_flux/tube.b) ; [10^8 erg/Mx/s] - needs to be multiplied by dt (time step) w/in simulation run.
+
+erg = { tot:tot, kin:kin, kin_par:kin_par, therm:therm, mag:mag, grav:grav, wave:wave, drag:drag, drag_mx:drag_mx}
 
 return, erg
 end
