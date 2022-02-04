@@ -121,6 +121,7 @@ alfven_params = fltarr( 9 ) ; parameters for Alfven wave propagation model:
 dva = fltarr( n ) ; dva/dl @ centers
 turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ 1.0e8 erg/cm^2/s ]. see calc_turb_heat.
 rho_e = fltarr( n ) ; density at edges ( for alven speed, mainly )
+source = fltarr( n ) ; source for calc_elsasser per unit mass [10^16 erg/g/s]
 
 
 
@@ -133,7 +134,7 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          inv_hflf:1.0, drag_params:drag_params, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
 	 kap_old:kap_old,$
-	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm }
+	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm, source:source }
 
 return, tube
 end
@@ -305,6 +306,10 @@ tube.drag_heat = frac2heat*tube.drag_flux  ; energy flux from drag supplied to h
 tube.drag_heat[0] = 0.0
 tube.drag_heat[tube.n-1] = 0.0
 
+; testing per unit mass
+drag_m = -total(tube.v*tube.a_drag, 1) ; [10^16 erg/g/s]
+tube.source =  0.5*( drag_m + shift( drag_m, -1 ) ) ; want it centered
+
 
 return
 end
@@ -371,7 +376,11 @@ source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - h
 
 ; add it all up
 ;dwp = prop2c + source -1.5*tube.dvn*tube.wp + tube.wm*tube.dva ;- sink_p
-dwp = -1.5*tube.dvn*tube.wp + source ;- sink_p ;+ tube.wm*tube.dva
+;dwp = -1.5*tube.dvn*tube.wp + source ;- sink_p ;+ tube.wm*tube.dva
+
+
+; testing per unit mass
+dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp
 tube.dwp = dwp
 
 ; apply BC
@@ -413,7 +422,14 @@ source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - h
 ;Rm = 0.5 * ( 0.25*tube.dvn - tube.dva ) * tube.dotz
 
 ;dwm = -prop2c + source -1.5*tube.dvn*tube.wm - tube.wp*tube.dva ;- sink_m
-dwm =  -1.5*tube.dvn*tube.wm + source ;- sink_m ;-tube.wp*tube.dva
+;dwm =  -1.5*tube.dvn*tube.wm + source ;- sink_m ;-tube.wp*tube.dva
+
+dvdl = tube.v - shift( tube.v, 0, 1 ) 
+dvdl[*,tube.n-1] = dvdl[*,tube.n-2]
+dvn = total( dvdl*tube.tv, 1 )/tube.dl
+
+; testing per unit mass
+dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm
 tube.dwm = dwm
 
 ; BCs
@@ -688,8 +704,12 @@ endif
 
 
 tube.net_erg_loss = tube.net_erg_loss + dt*total( tube.rad_loss - tube.heat )
-tube.drag_loss = tube.drag_loss - dt*total( tube.drag_flux/tube.b ) ; 10^8 erg/Mx - cumulative
+;tube.drag_loss = tube.drag_loss - dt*total( tube.drag_flux/tube.b ) ; 10^8 erg/Mx - cumulative
 tube.time = tube.time + dt
+
+
+; per unit mass: 
+tube.drag_loss = tube.drag_loss - dt*total(tube.source*tube.dm) ; [10^8 erg/Mx]
 
 return
 end
@@ -818,11 +838,15 @@ if( has_tag( tube, 'gpar' ) ) then begin
   grav = total( tube.dm*phi )
 endif else grav = 0.0
 
-wave = total( (tube.wp+tube.wm) * tube.dl / tube.b ) ; compined energy of waves along loop [10^8 erg/Mx]
-drag = total( tube.drag_flux ) ; !!!! for testing perposes. [erg/cm^3/s] NOT per MB
-drag_mx = total ( tube.drag_flux/tube.b) ; [10^8 erg/Mx/s] - needs to be multiplied by dt (time step) w/in simulation run.
+;wave = total( (tube.wp+tube.wm) * tube.dl / tube.b ) ; compined energy of waves along loop [10^8 erg/Mx]
+;drag_mx = total ( tube.drag_flux/tube.b) ; [10^8 erg/Mx/s] - needs to be multiplied by dt (time step) w/in simulation run.
 
-erg = { tot:tot, kin:kin, kin_par:kin_par, therm:therm, mag:mag, grav:grav, wave:wave, drag:drag, drag_mx:drag_mx}
+;testing per unit mass
+wave = total( (tube.wp+tube.wm) * tube.dm )
+drag_mx = total( tube.source*tube.dm )
+
+
+erg = { tot:tot, kin:kin, kin_par:kin_par, therm:therm, mag:mag, grav:grav, wave:wave, drag_mx:drag_mx}
 
 return, erg
 end
