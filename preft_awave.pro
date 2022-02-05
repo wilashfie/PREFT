@@ -122,7 +122,10 @@ dva = fltarr( n ) ; dva/dl @ centers
 turb_heat = fltarr ( n ) ; heat from cascading alfven waves, integrated over cell [ 1.0e8 erg/cm^2/s ]. see calc_turb_heat.
 rho_e = fltarr( n ) ; density at edges ( for alven speed, mainly )
 source = fltarr( n ) ; source for calc_elsasser per unit mass [10^16 erg/g/s]
-
+sink_p = fltarr( n ) ; sink for wp [10^16 erg/g/s]
+sink_m = fltarr( n ) ; sink for wm
+dva_p = fltarr( n ) ; test for dva/dl
+dva_m = fltarr( n ) ; "       "   
 
 
 const_str = ion_consts()
@@ -134,7 +137,8 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          inv_hflf:1.0, drag_params:drag_params, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
 	 kap_old:kap_old,$
-	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm, source:source }
+	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm, source:source, sink_p:sink_p, sink_m:sink_m, $
+	 dva_p:dva_p, dva_m:dva_m }
 
 return, tube
 end
@@ -188,7 +192,8 @@ mb = tube.dm*tube.b
 tube.rho_e = 0.5*( mb + shift( mb, 1 ) )/tube.dl_e;     mass density [ 1.0e-16 gm/cm^3 ]
 tube.rho_e[0] = tube.rho_e[1]
 
-tube.va = tube.b/sqrt(4*!pi*tube.rho_e)
+;tube.va = tube.b/sqrt(4*!pi*tube.rho_e)
+tube.va = tube.b/sqrt(4*!pi*tube.rho)
 
 return
 end
@@ -306,8 +311,9 @@ tube.drag_heat = frac2heat*tube.drag_flux  ; energy flux from drag supplied to h
 tube.drag_heat[0] = 0.0
 tube.drag_heat[tube.n-1] = 0.0
 
-; testing per unit mass
+; per unit mass source for awaves
 drag_m = -total(tube.v*tube.a_drag, 1) ; [10^16 erg/g/s]
+; may need to be multiplied by fraction...
 tube.source =  0.5*( drag_m + shift( drag_m, -1 ) ) ; want it centered
 
 
@@ -321,16 +327,24 @@ pro calc_turb_heat, tube
   ; calculate energy lost to heat from cascading Alfven waves
   ; called in calc_dtemp
 
-frac2heat_turb = tube.alfven_params[0];  fraction returned to heat - free parameter ( reminder: frac2heat_turb + frac2heat_nte = 1)
-kperp = tube.alfven_params[1]; a ∼ 􏰌δΦ/B, k⊥ = α*sqrt(B/δΦ) = α*sqrt(1/a) - ad hoc, may need to connect to drag parameter
+;frac2heat_turb = tube.alfven_params[0];  fraction returned to heat - free parameter ( reminder: frac2heat_turb + frac2heat_nte = 1)
+;kperp = tube.alfven_params[1]; a ∼ 􏰌δΦ/B, k⊥ = α*sqrt(B/δΦ) = α*sqrt(1/a) - ad hoc, may need to connect to drag parameter
 
-wmdrho = tube.wm / tube.rho > 0.0
-wpdrho = tube.wp / tube.rho > 0.0
-l_p = kperp * sqrt( wmdrho ) * tube.wp * tube.dl ; [erg/cm^2/s]
-l_m = kperp * sqrt( wpdrho ) * tube.wm * tube.dl
+;wmdrho = tube.wm / tube.rho > 0.0
+;wpdrho = tube.wp / tube.rho > 0.0
+;l_p = kperp * sqrt( wmdrho ) * tube.wp * tube.dl ; [erg/cm^2/s]
+;l_m = kperp * sqrt( wpdrho ) * tube.wm * tube.dl
 
 
-tube.turb_heat = frac2heat_turb * (l_p + l_m); check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
+sink = tube.sink_p + tube.sink_m ; [10^16 erg/g/s]
+sink_flux = sink*tube.dm*tube.b ; [10^8 erg/cm^s/s]
+
+frac2heat_turb = tube.alfven_params[0] ; fraction of loss in cascading awaves transfered to heat w/in loop
+
+tube.turb_heat = frac2heat_turb * sink_flux
+
+
+;tube.turb_heat = frac2heat_turb * (l_p + l_m); check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
 tube.turb_heat[0] = 0.0
 tube.turb_heat[tube.n-1] = 0.0
 
@@ -342,16 +356,23 @@ end
 ; -----------------------------
 
 pro calc_elsasser_plus, tube, dwp
-;  perform drag_computations
-; eveprop2c = 0.5*( shift( prop2, -1 ) + prop2 )rything called before:
-  ; --- calc_dv: calc_drag, calc_prho (pressure wave)
-  ; --- calc_dtemp: calc_turb_heat (turbulant heating), set_kappa (thermal conduction correction)
+
+; prepare standard tube variables
+calc_tv, tube
+field_at_points, tube
+calc_prho, tube ; recalc due to changes from calc_dv (note, do not add to calc_elsasser_minus)
+
+
+; testing local calc of dl here..
+dx = shift( tube.x, 0, -1 ) - tube.x
+dx[*,tube.n-1] = dx[*,tube.n-2]
+dl = sqrt( total( dx^2, 1 ) )
 
 ; divergence of Alfven velocity
-; only calculated once. reused below.
 dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
-dvadl[tube.n-1] =dvadl[tube.n-2]
-tube.dva = dvadl/tube.dl
+dvadl_c =  0.5*( shift( dvadl, -1 ) + dvadl )
+dvadl_c[tube.n-1] =dvadl_c[tube.n-2]
+tube.dva_p = dvadl_c/tube.dl
 
 ; advection
 dwpdl = shift( tube.wp, -1 ) - tube.wp
@@ -359,12 +380,9 @@ dwpdl[tube.n-1] = dwpdl[tube.n-2]
 dwpdl = dwpdl/tube.dl
 prop2c = tube.va*dwpdl
 
-; source and sink
-wmdrho = tube.wm / tube.rho > 0.0
-sink_p =  tube.alfven_params[1] * sqrt( wmdrho ) * tube.wp ; related to l_p from above... from counter propogating waves 
-
-source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - half of remainging drag energy not lost to heat? 
-
+; sink
+wm_pos = tube.wm > 0.0
+tube.sink_p =  tube.alfven_params[1] * sqrt(wm_pos) * tube.wp ; [10e16 erg/g/s]
 
 ; refection
 ; elsasser product - reused below
@@ -375,12 +393,7 @@ source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - h
 
 
 ; add it all up
-;dwp = prop2c + source -1.5*tube.dvn*tube.wp + tube.wm*tube.dva ;- sink_p
-;dwp = -1.5*tube.dvn*tube.wp + source ;- sink_p ;+ tube.wm*tube.dva
-
-
-; testing per unit mass
-dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp
+dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp
 tube.dwp = dwp
 
 ; apply BC
@@ -396,40 +409,42 @@ end
 ; -----------------------------
 
 pro calc_elsasser_minus, tube, dwm
-;  perform drag_computations
+
+; prepare standard tube variables
+;calc_tv, tube
+;field_at_points, tube
+;calc_prho, tube
 
 
-;dx = tube.x - shift( tube.x, 0, 1 ) 
-;dx[*,tube.n-1] = dx[*,tube.n-2]
-;dl = sqrt( total( dx^2, 1 ) )
+dx = tube.x - shift( tube.x, 0, 1 ) 
+dx[*,tube.n-1] = dx[*,tube.n-2]
+dl = sqrt( total( dx^2, 1 ) )
 
-;dvadl = tube.va - shift( tube.va, 1 )
-;dvadl[0] =dvadl[1]
-;dva = dvadl/dl
+dvadl = tube.va - shift( tube.va, 1 )
+dvadl_c =  0.5*( shift( dvadl, 1 ) + dvadl )
+dvadl_c[0] = dvadl_c[1]
+tube.dva_m = dvadl_c/tube.dl ; to match directionality? 
 
 dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
-
+;dwmdl = dwmdl/dl
 prop2c = tube.va*dwmdl
 
-wpdrho = tube.wp/tube.rho > 0.0
-sink_m =  tube.alfven_params[1] * sqrt( wpdrho ) * tube.wm
-
-source = (1.0-tube.drag_params[0])*0.5*tube.drag_flux/tube.dl ; [erg/cm^3/s] - half of remainging drag energy not lost to heat? 
-
+wp_pos = tube.wp > 0.0
+tube.sink_m =  tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
 
 ;Rm = 0.5 * ( 0.25*tube.dvn - tube.dva ) * tube.dotz
 
-;dwm = -prop2c + source -1.5*tube.dvn*tube.wm - tube.wp*tube.dva ;- sink_m
-;dwm =  -1.5*tube.dvn*tube.wm + source ;- sink_m ;-tube.wp*tube.dva
 
-dvdl = tube.v - shift( tube.v, 0, 1 ) 
-dvdl[*,tube.n-1] = dvdl[*,tube.n-2]
-dvn = total( dvdl*tube.tv, 1 )/tube.dl
+; test directionality of dvn (?)
+;dvdl = tube.v - shift( tube.v, 0, 1 ) 
+;dvdl[*,tube.n-1] = dvdl[*,tube.n-2]
+;dvn = total( dvdl*tube.tv, 1 )/tube.dl
+;dvn = total( dvdl*tube.tv, 1 )/dl
 
 ; testing per unit mass
-dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm
+dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm  
 tube.dwm = dwm
 
 ; BCs
