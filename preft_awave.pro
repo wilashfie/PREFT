@@ -90,6 +90,7 @@ tv = dblarr( 3, n ); the tangent vector
 tv_e = dblarr( 3, n ); the tangent vector @ edges
 k = dblarr( 3, n ); the curvature vector
 p = fltarr( n );  pressure [ erg/cm^3 ]
+p_old = fltarr( n );  pressure w/o turbulent heating [ erg/cm^3 ]
 b = fltarr( n );  the field strength @ edges
 db = fltarr( 3, n ); the gradient of field strength (@ edges)
 a_drag = fltarr( 3, n ); the acceleration from drag (@ edges)
@@ -136,7 +137,7 @@ tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          mpp:const_str.mpp, epamu:const_str.epamu, mu0:const_str.mu0, kap0:const_str.kap0, $
          inv_hflf:1.0, drag_params:drag_params, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
-	 kap_old:kap_old,$
+	 kap_old:kap_old, p_old:p_old, $
 	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm, source:source, sink_p:sink_p, sink_m:sink_m, $
 	 dva_p:dva_p, dva_m:dva_m }
 
@@ -185,7 +186,8 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
-tube.p = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm) ; wave pressure from Alfven wave energy densities.
+tube.p = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm)*tube.rho ; wave pressure from Alfven wave energy densities.
+tube.p_old = pressure
 
 ; also calculate alfven speed for good measure:
 mb = tube.dm*tube.b
@@ -247,6 +249,14 @@ t_e[0] = t_e[1]
 te32 = t_e*sqrt(t_e);  t_e^(1.5)  built for speed
 kap_sp = tube.kap0*t_e*te32;       spitzer conductivity [ 1.0e16 erg/cm/sec/MK ]
 
+; correction from Alfven energy wave
+dim_parm = tube.alfven_params[2] ; should be set to unity for test.
+wsum = (tube.wp + tube.wm)*tube.rho ; [erg/cm^3]
+wsum_e = 0.5*( shift( wsum, 1 ) + wsum )
+rat_alf = 1.0+dim_parm*wsum_e/tube.b^2
+kap_turb = kap_sp/rat_alf
+
+
 if( inv_hflf gt 0.01 ) then begin
   grad_t = ( tube.t - shift( tube.t, 1 ) )/tube.dl_e;        [ 1.0e-8 MK/cm ]
   grad_t[0] = 0.0;
@@ -259,19 +269,16 @@ if( inv_hflf gt 0.01 ) then begin
   f_fs[0] = f_fs[1]
 
   fctr = inv_hflf*kap_sp*grad_t/f_fs
+  fctr_turb = inv_hflf*kap_turb*grad_t/f_fs
   rat = sqrt( 1.0 + fctr*fctr )
+  rat_turb = sqrt( 1.0 + fctr_turb*fctr_turb )
 endif else rat = 1.0
 
 ; tube.kap = kap_sp/rat;
 kap_rat = kap_sp/rat;                      set to limit
-
-; correction from Alfven energy wave
-dim_parm = tube.alfven_params[2] ; should be set to unity for test.
-wsum = tube.wp + tube.wm
-wsum_e = 0.5*( shift( wsum, 1 ) + wsum )
-rat_alf = 1.0+dim_parm*wsum_e/tube.b^2
-tube.kap = kap_rat/rat_alf
+kap_turb = kap_turb/rat_turb;                      set to limit
 tube.kap_old = kap_rat
+tube.kap = kap_turb
 
 return
 end
@@ -294,7 +301,7 @@ end
 pro calc_drag, tube
 ;  perform drag_computations
 
-frac2heat = tube.drag_params[0];  fraction returned to heat 
+frac2wave = tube.drag_params[0];  fraction returned to wave energy density 
 
 vpar = total( tube.v*tube.tv_e, 1 )
 vperp = tube.v - ([1,1,1]#vpar)*tube.tv_e
@@ -307,14 +314,14 @@ dm_e[tube.n-1] = 0.0
 
 drag_b = -dm_e*total( tube.v*tube.a_drag, 1 ) ; power per Gauss @ edges [10^8 erg/Mx/s]
 tube.drag_flux = 0.5*( drag_b + shift( drag_b, -1 ) )*tube.b    ; energy flux at center from drag (not lost to heating) [10^8 erg/cm^2/s]
-tube.drag_heat = frac2heat*tube.drag_flux  ; energy flux from drag supplied to heating
-tube.drag_heat[0] = 0.0
-tube.drag_heat[tube.n-1] = 0.0
+;tube.drag_heat = frac2heat*tube.drag_flux  ; energy flux from drag supplied to heating
+;tube.drag_heat[0] = 0.0
+;tube.drag_heat[tube.n-1] = 0.0
 
 ; per unit mass source for awaves
 drag_m = -total(tube.v*tube.a_drag, 1) ; [10^16 erg/g/s]
 ; may need to be multiplied by fraction...
-tube.source =  0.5*( drag_m + shift( drag_m, -1 ) ) ; want it centered
+tube.source = frac2wave*0.5*( drag_m + shift( drag_m, -1 ) ) ; want it centered
 
 
 return
@@ -339,9 +346,9 @@ pro calc_turb_heat, tube
 sink = tube.sink_p + tube.sink_m ; [10^16 erg/g/s]
 sink_flux = sink*tube.dm*tube.b ; [10^8 erg/cm^s/s]
 
-frac2heat_turb = tube.alfven_params[0] ; fraction of loss in cascading awaves transfered to heat w/in loop
+frac2turb = tube.alfven_params[0] ; fraction of loss in cascading awaves transfered to heat w/in loop
 
-tube.turb_heat = frac2heat_turb * sink_flux
+tube.turb_heat = frac2turb * sink_flux
 
 
 ;tube.turb_heat = frac2heat_turb * (l_p + l_m); check if needed shift - 0.5*( turb_heat + shift( turb_heat, -1 ) ) - also, average the two?
@@ -364,9 +371,9 @@ calc_prho, tube ; recalc due to changes from calc_dv (note, do not add to calc_e
 
 
 ; testing local calc of dl here..
-dx = shift( tube.x, 0, -1 ) - tube.x
-dx[*,tube.n-1] = dx[*,tube.n-2]
-dl = sqrt( total( dx^2, 1 ) )
+;dx = shift( tube.x, 0, -1 ) - tube.x
+;dx[*,tube.n-1] = dx[*,tube.n-2]
+;dl = sqrt( total( dx^2, 1 ) )
 
 ; divergence of Alfven velocity
 dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
@@ -380,9 +387,17 @@ dwpdl[tube.n-1] = dwpdl[tube.n-2]
 dwpdl = dwpdl/tube.dl
 prop2c = tube.va*dwpdl
 
+; quick test
+dwpdl_c = 0.5*( shift( dwpdl, -1 ) + dwpdl )
+
+
+; Gaussian spatial profile
+bb = [1.0, tube.l[-1]/2.0, 5.0]
+gauss = gauss_func(tube.l, bb)
+
 ; sink
 wm_pos = tube.wm > 0.0
-tube.sink_p =  tube.alfven_params[1] * sqrt(wm_pos) * tube.wp ; [10e16 erg/g/s]
+tube.sink_p =  gauss*tube.alfven_params[1] * sqrt(wm_pos) * tube.wp ; [10e16 erg/g/s]
 
 ; refection
 ; elsasser product - reused below
@@ -393,7 +408,8 @@ tube.sink_p =  tube.alfven_params[1] * sqrt(wm_pos) * tube.wp ; [10e16 erg/g/s]
 
 
 ; add it all up
-dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp
+dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp - tube.sink_p
+;dwp =  prop2c + 0.5*tube.source - tube.sink_p;- 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp
 tube.dwp = dwp
 
 ; apply BC
@@ -428,11 +444,15 @@ tube.dva_m = dvadl_c/tube.dl ; to match directionality?
 dwmdl = tube.wm - shift( tube.wm, 1 ) ; for Alfven speed
 dwmdl[tube.n-1] = dwmdl[tube.n-2]
 dwmdl = dwmdl/tube.dl
-;dwmdl = dwmdl/dl
 prop2c = tube.va*dwmdl
 
+
+; Gaussian spatial profile
+bb = [1.0, tube.l[-1]/2.0, 5.0]
+gauss = gauss_func(tube.l, bb)
+
 wp_pos = tube.wp > 0.0
-tube.sink_m =  tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
+tube.sink_m =  gauss*tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
 
 ;Rm = 0.5 * ( 0.25*tube.dvn - tube.dva ) * tube.dotz
 
@@ -444,7 +464,8 @@ tube.sink_m =  tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
 ;dvn = total( dvdl*tube.tv, 1 )/dl
 
 ; testing per unit mass
-dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm  
+dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm - tube.sink_m
+;dwm = -prop2c + 0.5*tube.source - tube.sink_m;- 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm  
 tube.dwm = dwm
 
 ; BCs
@@ -679,8 +700,8 @@ tube.wm = (wmt + dt*dwm); > 0.0
 ref_frac = tube.alfven_params[3]
 ;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 ;itn = where(tube.t gt t0n)
-i0 = 930  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
-;i0 = 1001  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = 930  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+i0 = 940  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
 ;i0 = 0  ; defines chromospheric boundary - very specific to initialization of loop! subject to change.
 ;i0 = min(itn) + 1
 i1 = -i0 
