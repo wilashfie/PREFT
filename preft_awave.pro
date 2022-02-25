@@ -90,7 +90,7 @@ tv = dblarr( 3, n ); the tangent vector
 tv_e = dblarr( 3, n ); the tangent vector @ edges
 k = dblarr( 3, n ); the curvature vector
 p = fltarr( n );  pressure [ erg/cm^3 ]
-p_old = fltarr( n );  pressure w/o turbulent heating [ erg/cm^3 ]
+p_gas = fltarr( n );  pressure w/ wave energy [ erg/cm^3 ]
 b = fltarr( n );  the field strength @ edges
 db = fltarr( 3, n ); the gradient of field strength (@ edges)
 a_drag = fltarr( 3, n ); the acceleration from drag (@ edges)
@@ -133,11 +133,11 @@ const_str = ion_consts()
 
 tube = { n:n, time:time, gam:gam, x:x, v:v, l:l, dl:dl, dl_e:dl_e, $
          dm:dm, tv:tv, tv_e:tv_e, k:k, rho:rho, t:t, p:p, b:b, db:db, a_drag:a_drag, drag_const:drag_const, gpar:gpar, $
-         dvn:dvn, mu:mu, kap:kap, heat:heat, drag_heat:drag_heat, nte_heat:nte_heat, rad_loss:rad_loss, net_erg_loss:0.0, drag_loss:0.0, $
+         dvn:dvn, mu:mu, kap:kap, heat:heat, drag_heat:drag_heat, nte_heat:nte_heat, rad_loss:rad_loss, net_erg_loss:0.0, drag_loss:0.0,  $
          mpp:const_str.mpp, epamu:const_str.epamu, mu0:const_str.mu0, kap0:const_str.kap0, $
          inv_hflf:1.0, drag_params:drag_params, $
          va:va, wp:wp, wm:wm, alfven_params:alfven_params, turb_heat:turb_heat, dva:dva, rho_e:rho_e, $
-	 kap_old:kap_old, p_old:p_old, $
+	 kap_old:kap_old, p_gas:p_gas, $
 	 drag_flux:drag_flux, dotz:dotz, dwp:dwp, dwm:dwm, source:source, sink_p:sink_p, sink_m:sink_m, $
 	 dva_p:dva_p, dva_m:dva_m }
 
@@ -186,8 +186,8 @@ r = 0.01*(1.38/1.67/tube.mpp);        [ erg / cm^3 / MK / 1.0e-16 gm ]
 
 tube.rho = tube.dm*tube.b/tube.dl;     mass density [ 1.0e-16 gm/cm^3 ]
 pressure = r*tube.rho*tube.t;            pressure     [ ergs ]
-tube.p = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm)*tube.rho ; wave pressure from Alfven wave energy densities.
-tube.p_old = pressure
+tube.p = pressure 
+tube.p_gas = pressure + tube.alfven_params[4]*0.5*(tube.wp+tube.wm)*tube.rho ; wave pressure fro    m Alfven wave energy densities.
 
 ; also calculate alfven speed for good measure:
 mb = tube.dm*tube.b
@@ -377,7 +377,8 @@ calc_prho, tube ; recalc due to changes from calc_dv (note, do not add to calc_e
 
 ; divergence of Alfven velocity
 dvadl = shift( tube.va, -1 ) - tube.va ; for Alfven speed
-dvadl_c =  0.5*( shift( dvadl, -1 ) + dvadl )
+;dvadl_c =  0.5*( shift( dvadl, -1 ) + dvadl )
+dvadl_c =  dvadl ;0.5*( shift( dvadl, 1 ) + dvadl )
 dvadl_c[tube.n-1] =dvadl_c[tube.n-2]
 tube.dva_p = dvadl_c/tube.dl
 
@@ -392,8 +393,12 @@ dwpdl_c = 0.5*( shift( dwpdl, -1 ) + dwpdl )
 
 
 ; Gaussian spatial profile
-bb = [1.0, tube.l[-1]/2.0, 5.0]
-gauss = gauss_func(tube.l, bb)
+;bb = [1.0, tube.l[-1]/2.0, 0.1]
+;gauss = gauss_func(tube.l, bb)
+half = tube.n/2
+cent = tube.x[0,half]
+bb = [1.0, cent, 10]
+gauss = 1.0 ;gauss_func(tube.x[0,*], bb)
 
 ; sink
 wm_pos = tube.wm > 0.0
@@ -409,7 +414,7 @@ tube.sink_p =  gauss*tube.alfven_params[1] * sqrt(wm_pos) * tube.wp ; [10e16 erg
 
 ; add it all up
 dwp =  prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp - tube.sink_p
-;dwp =  prop2c + 0.5*tube.source - tube.sink_p;- 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp
+;dwp =  prop2c + 0.5*tube.source ;- tube.sink_p;- 0.5*tube.dvn*tube.wp - tube.dva_p*tube.wp
 tube.dwp = dwp
 
 ; apply BC
@@ -437,7 +442,8 @@ dx[*,tube.n-1] = dx[*,tube.n-2]
 dl = sqrt( total( dx^2, 1 ) )
 
 dvadl = tube.va - shift( tube.va, 1 )
-dvadl_c =  0.5*( shift( dvadl, 1 ) + dvadl )
+;dvadl_c =  0.5*( shift( dvadl, 1 ) + dvadl )
+dvadl_c =  dvadl ;0.5*( shift( dvadl, -1 ) + dvadl )
 dvadl_c[0] = dvadl_c[1]
 tube.dva_m = dvadl_c/tube.dl ; to match directionality? 
 
@@ -448,8 +454,13 @@ prop2c = tube.va*dwmdl
 
 
 ; Gaussian spatial profile
-bb = [1.0, tube.l[-1]/2.0, 5.0]
-gauss = gauss_func(tube.l, bb)
+;bb = [1.0, tube.l[-1]/2.0, 0.1]
+;gauss = gauss_func(tube.l, bb)
+half = tube.n/2
+cent = tube.x[0,half]
+bb = [1.0, cent, 10]
+gauss = 1.0; gauss_func(tube.x[0,*], bb)
+
 
 wp_pos = tube.wp > 0.0
 tube.sink_m =  gauss*tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
@@ -465,7 +476,7 @@ tube.sink_m =  gauss*tube.alfven_params[1] * sqrt( wp_pos ) * tube.wm
 
 ; testing per unit mass
 dwm = -prop2c + 0.5*tube.source - 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm - tube.sink_m
-;dwm = -prop2c + 0.5*tube.source - tube.sink_m;- 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm  
+;dwm = -prop2c + 0.5*tube.source ;- tube.sink_m;- 0.5*tube.dvn*tube.wm + tube.dva_m*tube.wm  
 tube.dwm = dwm
 
 ; BCs
@@ -492,7 +503,11 @@ rho_e = 0.5*( mb + shift( mb, 1 ) )/tube.dl_e;     mass density [ 1.0e-16 gm/cm^
 rho_e[0] = rho_e[1]
 
 ; pressure gradient
-dp = ( tube.p - shift( tube.p, 1 ) )/tube.dl_e
+pwave =  tube.alfven_params[4]*0.5*(tube.wp+tube.wm)*tube.rho ; wave pressure from Alfven wave energy densities.
+pwave = smooth(pwave,9)
+press = tube.p + pwave
+;dp = ( tube.p - shift( tube.p, 1 ) )/tube.dl_e
+dp = ( press - shift( press, 1 ) )/tube.dl_e
 
 ; viscous stress
 tube.mu = tube.mu0*tube.t*tube.t*sqrt(tube.t);   dynamic viscosity [ gm/cm/sec ]
@@ -505,7 +520,8 @@ tube.dvn = total( dvdl*tube.tv, 1 )/tube.dl
 sig = tube.mu*tube.dvn
 dsig = ( sig - shift( sig, 1 ) )/tube.dl_e
 
-tension = (tube.b*tube.b-4*!pi*tube.p) > (0.05*tube.b*tube.b);  an ad-hoc limit to prevent fire hose
+;tension = (tube.b*tube.b-4*!pi*tube.p) > (0.05*tube.b*tube.b);  an ad-hoc limit to prevent fire hose
+tension = (tube.b*tube.b-4*!pi*press) > (0.05*tube.b*tube.b);  an ad-hoc limit to prevent fire hose
 dv = 0.25*tube.k*([1,1,1]#tension)/!pi - tube.tv_e*([1,1,1]#(dp-dsig))
 
 ; ----- other viscosity term [added 7/23/13]
@@ -700,11 +716,15 @@ tube.wm = (wmt + dt*dwm); > 0.0
 ref_frac = tube.alfven_params[3]
 ;t0n = 1.9d2*tube.t[0] ; isothermal chromosphere temp - defines boundary at all times.
 ;itn = where(tube.t gt t0n)
+itn = where(tube.t gt 1.2) 
+i0 = itn[0]
+i1 = itn[-1]
 ;i0 = 930  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
-i0 = 940  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = 940  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
+;i0 = 840  ;; 918 -  defines chromospheric boundary - very specific to initialization of loop! subject to change.
 ;i0 = 0  ; defines chromospheric boundary - very specific to initialization of loop! subject to change.
 ;i0 = min(itn) + 1
-i1 = -i0 
+;i1 = -i0 
 ;i1 = max(itn) - 1
 
 
@@ -740,8 +760,10 @@ endif
 
 
 tube.net_erg_loss = tube.net_erg_loss + dt*total( tube.rad_loss - tube.heat )
-;tube.drag_loss = tube.drag_loss - dt*total( tube.drag_flux/tube.b ) ; 10^8 erg/Mx - cumulative
 tube.time = tube.time + dt
+
+; rad
+;tube.net_rad_loss = tube.net_rad_loss + dt*total(tube.rad_loss/tube.b)
 
 
 ; per unit mass: 
